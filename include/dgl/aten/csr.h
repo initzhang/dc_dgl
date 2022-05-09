@@ -423,6 +423,7 @@ CSRMatrix CSRRemove(CSRMatrix csr, IdArray entries);
 COOMatrix CSRRowWiseSamplingWithCache(
     CSRMatrix mat,
     CSRMatrix mat_cache,
+    int64_t cache_size,
     IdArray rows,
     int64_t num_samples,
     FloatArray prob = FloatArray(),

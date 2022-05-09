@@ -66,6 +66,7 @@ HeteroSubgraph ExcludeCertainEdges(
 HeteroSubgraph SampleNeighborsWithCache(
     const HeteroGraphPtr hg,
     const HeteroGraphPtr hg_cache,
+    const int64_t cache_size,
     const std::vector<IdArray>& nodes,
     const std::vector<int64_t>& fanouts,
     EdgeDir dir,
@@ -138,7 +139,7 @@ HeteroSubgraph SampleNeighborsWithCache(
           CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
           ::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
           sampled_coo = aten::CSRRowWiseSamplingWithCache(
-            hg->GetCSCMatrix(etype), hg_cache->GetCSCMatrix(etype), nodes_ntype, fanouts[etype], prob[etype], replace);
+            hg->GetCSCMatrix(etype), hg_cache->GetCSCMatrix(etype), cache_size, nodes_ntype, fanouts[etype], prob[etype], replace);
           sampled_coo = aten::COOTranspose(sampled_coo);
           break;
         default:
@@ -542,13 +543,14 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsWithCache")
     ::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighborsWithCache" << ::std::endl;
     HeteroGraphRef hg = args[0];
     HeteroGraphRef hg_cache = args[1];
-    const auto& nodes = ListValueToVector<IdArray>(args[2]);
-    IdArray fanouts_array = args[3];
+    const int64_t cache_size = args[2];
+    const auto& nodes = ListValueToVector<IdArray>(args[3]);
+    IdArray fanouts_array = args[4];
     const auto& fanouts = fanouts_array.ToVector<int64_t>();
-    const std::string dir_str = args[4];
-    const auto& prob = ListValueToVector<FloatArray>(args[5]);
-    const auto& exclude_edges = ListValueToVector<IdArray>(args[6]);
-    const bool replace = args[7];
+    const std::string dir_str = args[5];
+    const auto& prob = ListValueToVector<FloatArray>(args[6]);
+    const auto& exclude_edges = ListValueToVector<IdArray>(args[7]);
+    const bool replace = args[8];
 
     CHECK(dir_str == "in" || dir_str == "out")
       << "Invalid edge direction. Must be \"in\" or \"out\".";
@@ -556,7 +558,7 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsWithCache")
 
     std::shared_ptr<HeteroSubgraph> subg(new HeteroSubgraph);
     *subg = sampling::SampleNeighborsWithCache(
-        hg.sptr(), hg_cache.sptr(), nodes, fanouts, dir, prob, exclude_edges, replace);
+        hg.sptr(), hg_cache.sptr(), cache_size, nodes, fanouts, dir, prob, exclude_edges, replace);
 
     *rv = HeteroSubgraphRef(subg);
   });

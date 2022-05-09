@@ -152,7 +152,7 @@ def sample_etype_neighbors(g, nodes, etype_field, fanout, edge_dir='in', prob=No
 
 DGLHeteroGraph.sample_etype_neighbors = utils.alias_func(sample_etype_neighbors)
 
-def sample_neighbors_with_cache(g, g_cached, nodes, fanout, edge_dir='in', prob=None, replace=False,
+def sample_neighbors_with_cache(g, g_cached, cache_size, nodes, fanout, edge_dir='in', prob=None, replace=False,
                      copy_ndata=True, copy_edata=True, _dist_training=False,
                      exclude_edges=None, output_device=None):
     """Sample neighboring edges of the given nodes and return the induced subgraph.
@@ -240,7 +240,7 @@ def sample_neighbors_with_cache(g, g_cached, nodes, fanout, edge_dir='in', prob=
 
     if F.device_type(g.device) == 'cpu' and F.device_type(g_cached.device) == 'cuda' and g.is_pinned():
         frontier = _sample_neighbors_with_cache(
-            g, g_cached, nodes, fanout, edge_dir=edge_dir, prob=prob, replace=replace,
+            g, g_cached, cache_size, nodes, fanout, edge_dir=edge_dir, prob=prob, replace=replace,
             copy_ndata=copy_ndata, copy_edata=copy_edata)
         if exclude_edges is not None:
             eid_excluder = EidExcluder(exclude_edges)
@@ -250,7 +250,7 @@ def sample_neighbors_with_cache(g, g_cached, nodes, fanout, edge_dir='in', prob=
 
     return frontier if output_device is None else frontier.to(output_device)
 
-def _sample_neighbors_with_cache(g, g_cached, nodes, fanout, edge_dir='in', prob=None, replace=False,
+def _sample_neighbors_with_cache(g, g_cached, cache_size, nodes, fanout, edge_dir='in', prob=None, replace=False,
                       copy_ndata=True, copy_edata=True, _dist_training=False,
                       exclude_edges=None):
     if not isinstance(nodes, dict):
@@ -312,7 +312,7 @@ def _sample_neighbors_with_cache(g, g_cached, nodes, fanout, edge_dir='in', prob
             else:
                 excluded_edges_all_t.append(nd.array([], ctx=ctx))
 
-    subgidx = _CAPI_DGLSampleNeighborsWithCache(g._graph, g_cached._graph, nodes_all_types, fanout_array,
+    subgidx = _CAPI_DGLSampleNeighborsWithCache(g._graph, g_cached._graph, cache_size, nodes_all_types, fanout_array,
                                        edge_dir, prob_arrays, excluded_edges_all_t, replace)
     induced_edges = subgidx.induced_edges
     ret = DGLHeteroGraph(subgidx.graph, g.ntypes, g.etypes)

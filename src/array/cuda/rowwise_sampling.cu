@@ -282,6 +282,7 @@ __global__ void _CSRRowWiseSampleDegreeKernelWithCache(
 template <DLDeviceType XPU, typename IdType>
 COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
                                     CSRMatrix mat_cache,
+                                    const int64_t cache_size,
                                     IdArray rows,
                                     const int64_t num_picks,
                                     const bool replace) {
@@ -418,9 +419,9 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
 }
 
 template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLGPU, int32_t>(
-    CSRMatrix, CSRMatrix, IdArray, int64_t, bool);
+    CSRMatrix, CSRMatrix, int64_t, IdArray, int64_t, bool);
 template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLGPU, int64_t>(
-    CSRMatrix, CSRMatrix, IdArray, int64_t, bool);
+    CSRMatrix, CSRMatrix, int64_t, IdArray, int64_t, bool);
 
 
 /////////////////////////////// CSR ///////////////////////////////
