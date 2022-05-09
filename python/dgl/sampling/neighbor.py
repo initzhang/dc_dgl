@@ -11,6 +11,7 @@ from .utils import EidExcluder
 __all__ = [
     'sample_etype_neighbors',
     'sample_neighbors',
+    'sample_neighbors_with_cache',
     'sample_neighbors_biased',
     'select_topk']
 
@@ -150,6 +151,195 @@ def sample_etype_neighbors(g, nodes, etype_field, fanout, edge_dir='in', prob=No
     return ret if output_device is None else ret.to(output_device)
 
 DGLHeteroGraph.sample_etype_neighbors = utils.alias_func(sample_etype_neighbors)
+
+def sample_neighbors_with_cache(g, g_cached, nodes, fanout, edge_dir='in', prob=None, replace=False,
+                     copy_ndata=True, copy_edata=True, _dist_training=False,
+                     exclude_edges=None, output_device=None):
+    """Sample neighboring edges of the given nodes and return the induced subgraph.
+
+    For each node, a number of inbound (or outbound when ``edge_dir == 'out'``) edges
+    will be randomly chosen.  The graph returned will then contain all the nodes in the
+    original graph, but only the sampled edges.
+
+    Node/edge features are not preserved. The original IDs of
+    the sampled edges are stored as the `dgl.EID` feature in the returned graph.
+
+    Parameters
+    ----------
+    g : DGLGraph
+        The graph.  Can be either on CPU or GPU.
+    g_cached : DGLGraph 
+        The graph.  must be on GPU.
+    nodes : tensor or dict
+        Node IDs to sample neighbors from.
+
+        This argument can take a single ID tensor or a dictionary of node types and ID tensors.
+        If a single tensor is given, the graph must only have one type of nodes.
+    fanout : int or dict[etype, int]
+        The number of edges to be sampled for each node on each edge type.
+
+        This argument can take a single int or a dictionary of edge types and ints.
+        If a single int is given, DGL will sample this number of edges for each node for
+        every edge type.
+
+        If -1 is given for a single edge type, all the neighboring edges with that edge
+        type will be selected.
+    edge_dir : str, optional
+        Determines whether to sample inbound or outbound edges.
+
+        Can take either ``in`` for inbound edges or ``out`` for outbound edges.
+    prob : str, optional
+        Feature name used as the (unnormalized) probabilities associated with each
+        neighboring edge of a node.  The feature must have only one element for each
+        edge.
+
+        The features must be non-negative floats, and the sum of the features of
+        inbound/outbound edges for every node must be positive (though they don't have
+        to sum up to one).  Otherwise, the result will be undefined.
+
+        If :attr:`prob` is not None, GPU sampling is not supported.
+    exclude_edges: tensor or dict
+        Edge IDs to exclude during sampling neighbors for the seed nodes.
+
+        This argument can take a single ID tensor or a dictionary of edge types and ID tensors.
+        If a single tensor is given, the graph must only have one type of nodes.
+    replace : bool, optional
+        If True, sample with replacement.
+    copy_ndata: bool, optional
+        If True, the node features of the new graph are copied from
+        the original graph. If False, the new graph will not have any
+        node features.
+
+        (Default: True)
+    copy_edata: bool, optional
+        If True, the edge features of the new graph are copied from
+        the original graph.  If False, the new graph will not have any
+        edge features.
+
+        (Default: True)
+    _dist_training : bool, optional
+        Internal argument.  Do not use.
+
+        (Default: False)
+    output_device : Framework-specific device context object, optional
+        The output device.  Default is the same as the input graph.
+
+    Returns
+    -------
+    DGLGraph
+        A sampled subgraph containing only the sampled neighboring edges.
+
+    Notes
+    -----
+    If :attr:`copy_ndata` or :attr:`copy_edata` is True, same tensors are used as
+    the node or edge features of the original graph and the new graph.
+    As a result, users should avoid performing in-place operations
+    on the node features of the new graph to avoid feature corruption.
+
+    """
+
+    if F.device_type(g.device) == 'cpu' and F.device_type(g_cached.device) == 'cuda' and g.is_pinned():
+        frontier = _sample_neighbors_with_cache(
+            g, g_cached, nodes, fanout, edge_dir=edge_dir, prob=prob, replace=replace,
+            copy_ndata=copy_ndata, copy_edata=copy_edata)
+        if exclude_edges is not None:
+            eid_excluder = EidExcluder(exclude_edges)
+            frontier = eid_excluder(frontier)
+    else:
+        raise ValueError
+
+    return frontier if output_device is None else frontier.to(output_device)
+
+def _sample_neighbors_with_cache(g, g_cached, nodes, fanout, edge_dir='in', prob=None, replace=False,
+                      copy_ndata=True, copy_edata=True, _dist_training=False,
+                      exclude_edges=None):
+    if not isinstance(nodes, dict):
+        if len(g.ntypes) > 1:
+            raise DGLError("Must specify node type when the graph is not homogeneous.")
+        nodes = {g.ntypes[0] : nodes}
+
+    nodes = utils.prepare_tensor_dict(g, nodes, 'nodes')
+    if len(nodes) == 0:
+        raise ValueError(
+            "Got an empty dictionary in the nodes argument. "
+            "Please pass in a dictionary with empty tensors as values instead.")
+    device = utils.context_of(nodes)
+    ctx = utils.to_dgl_context(device)
+    nodes_all_types = []
+    for ntype in g.ntypes:
+        if ntype in nodes:
+            nodes_all_types.append(F.to_dgl_nd(nodes[ntype]))
+        else:
+            nodes_all_types.append(nd.array([], ctx=ctx))
+
+    if isinstance(fanout, nd.NDArray):
+        fanout_array = fanout
+    else:
+        if not isinstance(fanout, dict):
+            fanout_array = [int(fanout)] * len(g.etypes)
+        else:
+            if len(fanout) != len(g.etypes):
+                raise DGLError('Fan-out must be specified for each edge type '
+                               'if a dict is provided.')
+            fanout_array = [None] * len(g.etypes)
+            for etype, value in fanout.items():
+                fanout_array[g.get_etype_id(etype)] = value
+        fanout_array = F.to_dgl_nd(F.tensor(fanout_array, dtype=F.int64))
+
+    if isinstance(prob, list) and len(prob) > 0 and \
+            isinstance(prob[0], nd.NDArray):
+        prob_arrays = prob
+    elif prob is None:
+        prob_arrays = [nd.array([], ctx=nd.cpu())] * len(g.etypes)
+    else:
+        prob_arrays = []
+        for etype in g.canonical_etypes:
+            if prob in g.edges[etype].data:
+                prob_arrays.append(F.to_dgl_nd(g.edges[etype].data[prob]))
+            else:
+                prob_arrays.append(nd.array([], ctx=nd.cpu()))
+
+    excluded_edges_all_t = []
+    if exclude_edges is not None:
+        if not isinstance(exclude_edges, dict):
+            if len(g.etypes) > 1:
+                raise DGLError("Must specify etype type when the graph is not homogeneous.")
+            exclude_edges = {g.canonical_etypes[0] : exclude_edges}
+        exclude_edges = utils.prepare_tensor_dict(g, exclude_edges, 'edges')
+        for etype in g.canonical_etypes:
+            if etype in exclude_edges:
+                excluded_edges_all_t.append(F.to_dgl_nd(exclude_edges[etype]))
+            else:
+                excluded_edges_all_t.append(nd.array([], ctx=ctx))
+
+    subgidx = _CAPI_DGLSampleNeighborsWithCache(g._graph, g_cached._graph, nodes_all_types, fanout_array,
+                                       edge_dir, prob_arrays, excluded_edges_all_t, replace)
+    induced_edges = subgidx.induced_edges
+    ret = DGLHeteroGraph(subgidx.graph, g.ntypes, g.etypes)
+
+    """
+    currently do not consider frames!!
+    """
+    # handle features
+    # (TODO) (BarclayII) DGL distributed fails with bus error, freezes, or other
+    # incomprehensible errors with lazy feature copy.
+    # So in distributed training context, we fall back to old behavior where we
+    # only set the edge IDs.
+    if not _dist_training:
+        if copy_ndata:
+            node_frames = utils.extract_node_subframes(g, device)
+            utils.set_new_frames(ret, node_frames=node_frames)
+
+        if copy_edata:
+            edge_frames = utils.extract_edge_subframes(g, induced_edges)
+            utils.set_new_frames(ret, edge_frames=edge_frames)
+    else:
+        for i, etype in enumerate(ret.canonical_etypes):
+            ret.edges[etype].data[EID] = induced_edges[i]
+
+    return ret
+
+#DGLHeteroGraph.sample_neighbors_with_cache = utils.alias_func(sample_neighbors_with_cache)
 
 def sample_neighbors(g, nodes, fanout, edge_dir='in', prob=None, replace=False,
                      copy_ndata=True, copy_edata=True, _dist_training=False,

@@ -161,6 +161,11 @@ CSRMatrix CSRRemove(CSRMatrix csr, IdArray entries);
 
 // FloatType is the type of probability data.
 template <DLDeviceType XPU, typename IdType, typename FloatType>
+COOMatrix CSRRowWiseSamplingWithCache(
+    CSRMatrix mat, CSRMatrix mat_cache, IdArray rows, int64_t num_samples, FloatArray prob, bool replace);
+
+// FloatType is the type of probability data.
+template <DLDeviceType XPU, typename IdType, typename FloatType>
 COOMatrix CSRRowWiseSampling(
     CSRMatrix mat, IdArray rows, int64_t num_samples, FloatArray prob, bool replace);
 
@@ -170,6 +175,10 @@ COOMatrix CSRRowWisePerEtypeSampling(
     CSRMatrix mat, IdArray rows, IdArray etypes,
     const std::vector<int64_t>& num_samples, FloatArray prob, bool replace,
     bool etype_sorted);
+
+template <DLDeviceType XPU, typename IdType>
+COOMatrix CSRRowWiseSamplingUniformWithCache(
+    CSRMatrix mat, CSRMatrix mat_cache, IdArray rows, int64_t num_samples, bool replace);
 
 template <DLDeviceType XPU, typename IdType>
 COOMatrix CSRRowWiseSamplingUniform(

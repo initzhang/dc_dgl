@@ -153,6 +153,18 @@ template COOMatrix CSRRowWisePerEtypeSampling<kDLCPU, int64_t, double>(
     CSRMatrix, IdArray, IdArray, const std::vector<int64_t>&, FloatArray, bool, bool);
 
 template <DLDeviceType XPU, typename IdxType>
+COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat, CSRMatrix mat_cache, IdArray rows,
+                                    int64_t num_samples, bool replace) {
+  auto pick_fn = GetSamplingUniformPickFn<IdxType>(num_samples, replace);
+  return CSRRowWisePick(mat, rows, num_samples, replace, pick_fn);
+}
+
+template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLCPU, int32_t>(
+    CSRMatrix, CSRMatrix, IdArray, int64_t, bool);
+template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLCPU, int64_t>(
+    CSRMatrix, CSRMatrix, IdArray, int64_t, bool);
+
+template <DLDeviceType XPU, typename IdxType>
 COOMatrix CSRRowWiseSamplingUniform(CSRMatrix mat, IdArray rows,
                                     int64_t num_samples, bool replace) {
   auto pick_fn = GetSamplingUniformPickFn<IdxType>(num_samples, replace);

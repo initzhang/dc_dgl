@@ -8,6 +8,7 @@
 #include <dgl/runtime/device_api.h>
 #include <curand_kernel.h>
 #include <numeric>
+#include <iostream>
 
 #include "./dgl_cub.cuh"
 #include "../../array/cuda/atomic.cuh"
@@ -247,13 +248,14 @@ __global__ void _CSRRowWiseSampleReplaceKernel(
 
 }  // namespace
 
-/////////////////////////////// CSR ///////////////////////////////
-
+/////////////////////////////// CSR + UVA + CACHE ///////////////////////////////
 template <DLDeviceType XPU, typename IdType>
-COOMatrix CSRRowWiseSamplingUniform(CSRMatrix mat,
+COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
+                                    CSRMatrix mat_cache,
                                     IdArray rows,
                                     const int64_t num_picks,
                                     const bool replace) {
+  ::std::cout << "in impl::CSRRowWiseSamplingUniformWithCache, cuda kernel" << ::std::endl;
   const auto& ctx = rows->ctx;
   auto device = runtime::DeviceAPI::Get(ctx);
 
@@ -292,6 +294,8 @@ COOMatrix CSRRowWiseSamplingUniform(CSRMatrix mat,
   }
 
   // fill out_ptr
+  // because the elements number picked per row (out_deg info) is
+  // given already, so we can determine the ind_ptr now
   IdType * out_ptr = static_cast<IdType*>(
       device->AllocWorkspace(ctx, (num_rows+1)*sizeof(IdType)));
   size_t prefix_temp_size = 0;
@@ -326,6 +330,149 @@ COOMatrix CSRRowWiseSamplingUniform(CSRMatrix mat,
   const uint64_t random_seed = RandomEngine::ThreadLocal()->RandInt(1000000000);
 
   // select edges
+  // determine the content of col indices
+  if (replace) {
+    constexpr int BLOCK_WARPS = 128/WARP_SIZE;
+    // the number of rows each thread block will cover
+    constexpr int TILE_SIZE = BLOCK_WARPS*16;
+    const dim3 block(WARP_SIZE, BLOCK_WARPS);
+    const dim3 grid((num_rows+TILE_SIZE-1)/TILE_SIZE);
+    _CSRRowWiseSampleReplaceKernel<IdType, BLOCK_WARPS, TILE_SIZE><<<grid, block, 0, stream>>>(
+        random_seed,
+        num_picks,
+        num_rows,
+        slice_rows,
+        in_ptr,
+        in_cols,
+        data,
+        out_ptr,
+        out_rows,
+        out_cols,
+        out_idxs);
+  } else {
+    constexpr int BLOCK_WARPS = 128/WARP_SIZE;
+    // the number of rows each thread block will cover
+    constexpr int TILE_SIZE = BLOCK_WARPS*16;
+    const dim3 block(WARP_SIZE, BLOCK_WARPS);
+    const dim3 grid((num_rows+TILE_SIZE-1)/TILE_SIZE);
+    _CSRRowWiseSampleKernel<IdType, BLOCK_WARPS, TILE_SIZE><<<grid, block, 0, stream>>>(
+        random_seed,
+        num_picks,
+        num_rows,
+        slice_rows,
+        in_ptr,
+        in_cols,
+        data,
+        out_ptr,
+        out_rows,
+        out_cols,
+        out_idxs);
+  }
+  device->FreeWorkspace(ctx, out_ptr);
+
+  // wait for copying `new_len` to finish
+  CUDA_CALL(cudaEventSynchronize(copyEvent));
+  CUDA_CALL(cudaEventDestroy(copyEvent));
+
+  picked_row = picked_row.CreateView({new_len}, picked_row->dtype);
+  picked_col = picked_col.CreateView({new_len}, picked_col->dtype);
+  picked_idx = picked_idx.CreateView({new_len}, picked_idx->dtype);
+
+  return COOMatrix(mat.num_rows, mat.num_cols, picked_row,
+      picked_col, picked_idx);
+}
+
+template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLGPU, int32_t>(
+    CSRMatrix, CSRMatrix, IdArray, int64_t, bool);
+template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLGPU, int64_t>(
+    CSRMatrix, CSRMatrix, IdArray, int64_t, bool);
+
+
+
+
+/////////////////////////////// CSR ///////////////////////////////
+
+template <DLDeviceType XPU, typename IdType>
+COOMatrix CSRRowWiseSamplingUniform(CSRMatrix mat,
+                                    IdArray rows,
+                                    const int64_t num_picks,
+                                    const bool replace) {
+  ::std::cout << "in impl::CSRRowWiseSamplingUniform, cuda kernel" << ::std::endl;
+  const auto& ctx = rows->ctx;
+  auto device = runtime::DeviceAPI::Get(ctx);
+
+  // TODO(dlasalle): Once the device api supports getting the stream from the
+  // context, that should be used instead of the default stream here.
+  cudaStream_t stream = 0;
+
+  const int64_t num_rows = rows->shape[0];
+  const IdType * const slice_rows = static_cast<const IdType*>(rows->data);
+
+  IdArray picked_row = NewIdArray(num_rows * num_picks, ctx, sizeof(IdType) * 8);
+  IdArray picked_col = NewIdArray(num_rows * num_picks, ctx, sizeof(IdType) * 8);
+  IdArray picked_idx = NewIdArray(num_rows * num_picks, ctx, sizeof(IdType) * 8);
+  const IdType * const in_ptr = static_cast<const IdType*>(mat.indptr->data);
+  const IdType * const in_cols = static_cast<const IdType*>(mat.indices->data);
+  IdType* const out_rows = static_cast<IdType*>(picked_row->data);
+  IdType* const out_cols = static_cast<IdType*>(picked_col->data);
+  IdType* const out_idxs = static_cast<IdType*>(picked_idx->data);
+
+  const IdType* const data = CSRHasData(mat) ?
+      static_cast<IdType*>(mat.data->data) : nullptr;
+
+  // compute degree
+  IdType * out_deg = static_cast<IdType*>(
+      device->AllocWorkspace(ctx, (num_rows+1)*sizeof(IdType)));
+  if (replace) {
+    const dim3 block(512);
+    const dim3 grid((num_rows+block.x-1)/block.x);
+    _CSRRowWiseSampleDegreeReplaceKernel<<<grid, block, 0, stream>>>(
+        num_picks, num_rows, slice_rows, in_ptr, out_deg);
+  } else {
+    const dim3 block(512);
+    const dim3 grid((num_rows+block.x-1)/block.x);
+    _CSRRowWiseSampleDegreeKernel<<<grid, block, 0, stream>>>(
+        num_picks, num_rows, slice_rows, in_ptr, out_deg);
+  }
+
+  // fill out_ptr
+  // because the elements number picked per row (out_deg info) is
+  // given already, so we can determine the ind_ptr now
+  IdType * out_ptr = static_cast<IdType*>(
+      device->AllocWorkspace(ctx, (num_rows+1)*sizeof(IdType)));
+  size_t prefix_temp_size = 0;
+  CUDA_CALL(cub::DeviceScan::ExclusiveSum(nullptr, prefix_temp_size,
+      out_deg,
+      out_ptr,
+      num_rows+1,
+      stream));
+  void * prefix_temp = device->AllocWorkspace(ctx, prefix_temp_size);
+  CUDA_CALL(cub::DeviceScan::ExclusiveSum(prefix_temp, prefix_temp_size,
+      out_deg,
+      out_ptr,
+      num_rows+1,
+      stream));
+  device->FreeWorkspace(ctx, prefix_temp);
+  device->FreeWorkspace(ctx, out_deg);
+
+  cudaEvent_t copyEvent;
+  CUDA_CALL(cudaEventCreate(&copyEvent));
+
+  // TODO(dlasalle): use pinned memory to overlap with the actual sampling, and wait on
+  // a cudaevent
+  IdType new_len;
+  device->CopyDataFromTo(out_ptr, num_rows*sizeof(new_len), &new_len, 0,
+        sizeof(new_len),
+        ctx,
+        DGLContext{kDLCPU, 0},
+        mat.indptr->dtype,
+        stream);
+  CUDA_CALL(cudaEventRecord(copyEvent, stream));
+
+  const uint64_t random_seed = RandomEngine::ThreadLocal()->RandInt(1000000000);
+
+  // select edges
+  // determine the content of col indices
   if (replace) {
     constexpr int BLOCK_WARPS = 128/WARP_SIZE;
     // the number of rows each thread block will cover

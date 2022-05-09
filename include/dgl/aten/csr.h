@@ -419,6 +419,16 @@ CSRMatrix CSRRemove(CSRMatrix csr, IdArray entries);
  * \param replace True if sample with replacement
  * \return A COOMatrix storing the picked row, col and data indices.
  */
+
+COOMatrix CSRRowWiseSamplingWithCache(
+    CSRMatrix mat,
+    CSRMatrix mat_cache,
+    IdArray rows,
+    int64_t num_samples,
+    FloatArray prob = FloatArray(),
+    bool replace = true);
+
+
 COOMatrix CSRRowWiseSampling(
     CSRMatrix mat,
     IdArray rows,

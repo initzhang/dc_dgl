@@ -10,6 +10,7 @@
 #include <dgl/runtime/shared_mem.h>
 #include <dgl/runtime/device_api.h>
 #include <sstream>
+#include <iostream>
 #include "../c_api_common.h"
 #include "./array_op.h"
 #include "./arith.h"
@@ -545,10 +546,25 @@ CSRMatrix CSRRemove(CSRMatrix csr, IdArray entries) {
   return ret;
 }
 
+COOMatrix CSRRowWiseSamplingWithCache(
+    CSRMatrix mat, CSRMatrix mat_cache, IdArray rows, int64_t num_samples, FloatArray prob, bool replace) {
+  COOMatrix ret;
+  if (IsNullArray(prob)) {
+    ::std::cout << "in aten::CSRRowWiseSamplingWithCache, ATEN_CSR_SWITCH_CUDA_UVA" << ::std::endl;
+    ATEN_CSR_SWITCH_CUDA_UVA(mat, rows, XPU, IdType, "CSRRowWiseSamplingWithCache", {
+      ret = impl::CSRRowWiseSamplingUniformWithCache<XPU, IdType>(mat, mat_cache, rows, num_samples, replace);
+    });
+  } else {
+    LOG(FATAL) << "Only int32 or int64 is supported.";
+  }
+  return ret;
+}
+
 COOMatrix CSRRowWiseSampling(
     CSRMatrix mat, IdArray rows, int64_t num_samples, FloatArray prob, bool replace) {
   COOMatrix ret;
   if (IsNullArray(prob)) {
+    ::std::cout << "in aten::CSRRowWiseSampling, ATEN_CSR_SWITCH_CUDA_UVA" << ::std::endl;
     ATEN_CSR_SWITCH_CUDA_UVA(mat, rows, XPU, IdType, "CSRRowWiseSampling", {
       ret = impl::CSRRowWiseSamplingUniform<XPU, IdType>(mat, rows, num_samples, replace);
     });

@@ -9,6 +9,7 @@
 #include <dgl/array.h>
 #include <dgl/aten/macro.h>
 #include <dgl/sampling/neighbor.h>
+#include <iostream>
 #include "../../../c_api_common.h"
 #include "../../unit_graph.h"
 
@@ -60,6 +61,104 @@ HeteroSubgraph ExcludeCertainEdges(
     HeteroSubgraph subg = hg_view->EdgeSubgraph(remain_edges, true);
     subg.induced_edges = std::move(remain_induced_edges);
     return subg;
+}
+
+HeteroSubgraph SampleNeighborsWithCache(
+    const HeteroGraphPtr hg,
+    const HeteroGraphPtr hg_cache,
+    const std::vector<IdArray>& nodes,
+    const std::vector<int64_t>& fanouts,
+    EdgeDir dir,
+    const std::vector<FloatArray>& prob,
+    const std::vector<IdArray>& exclude_edges,
+    bool replace) {
+
+  // sanity check
+  CHECK_EQ(nodes.size(), hg->NumVertexTypes())
+    << "Number of node ID tensors must match the number of node types.";
+  CHECK_EQ(fanouts.size(), hg->NumEdgeTypes())
+    << "Number of fanout values must match the number of edge types.";
+  CHECK_EQ(prob.size(), hg->NumEdgeTypes())
+    << "Number of probability tensors must match the number of edge types.";
+
+  DLContext ctx = aten::GetContextOf(nodes);
+
+  std::vector<HeteroGraphPtr> subrels(hg->NumEdgeTypes());
+  std::vector<IdArray> induced_edges(hg->NumEdgeTypes());
+  for (dgl_type_t etype = 0; etype < hg->NumEdgeTypes(); ++etype) {
+    auto pair = hg->meta_graph()->FindEdge(etype);
+    const dgl_type_t src_vtype = pair.first;
+    const dgl_type_t dst_vtype = pair.second;
+    const IdArray nodes_ntype = nodes[(dir == EdgeDir::kOut)? src_vtype : dst_vtype];
+    const int64_t num_nodes = nodes_ntype->shape[0];
+    if (num_nodes == 0 || fanouts[etype] == 0) {
+      // Nothing to sample for this etype, create a placeholder relation graph
+      subrels[etype] = UnitGraph::Empty(
+        hg->GetRelationGraph(etype)->NumVertexTypes(),
+        hg->NumVertices(src_vtype),
+        hg->NumVertices(dst_vtype),
+        hg->DataType(), ctx);
+      induced_edges[etype] = aten::NullArray(hg->DataType(), ctx);
+    } else if (fanouts[etype] == -1) {
+      LOG(FATAL) << "do not support full neighbor for now.";
+      const auto &earr = (dir == EdgeDir::kOut) ?
+        hg->OutEdges(etype, nodes_ntype) :
+        hg->InEdges(etype, nodes_ntype);
+      subrels[etype] = UnitGraph::CreateFromCOO(
+        hg->GetRelationGraph(etype)->NumVertexTypes(),
+        hg->NumVertices(src_vtype),
+        hg->NumVertices(dst_vtype),
+        earr.src,
+        earr.dst);
+      induced_edges[etype] = earr.id;
+    } else {
+      // sample from one relation graph
+      auto req_fmt = (dir == EdgeDir::kOut)? CSR_CODE : CSC_CODE;
+      auto avail_fmt = hg->SelectFormat(etype, req_fmt);
+      COOMatrix sampled_coo;
+      switch (avail_fmt) {
+        case SparseFormat::kCOO:
+          LOG(FATAL) << "should not touch here";
+          if (dir == EdgeDir::kIn) {
+            sampled_coo = aten::COOTranspose(aten::COORowWiseSampling(
+              aten::COOTranspose(hg->GetCOOMatrix(etype)),
+              nodes_ntype, fanouts[etype], prob[etype], replace));
+          } else {
+            sampled_coo = aten::COORowWiseSampling(
+              hg->GetCOOMatrix(etype), nodes_ntype, fanouts[etype], prob[etype], replace);
+          }
+          break;
+        case SparseFormat::kCSR:
+          LOG(FATAL) << "should not touch here";
+          CHECK(dir == EdgeDir::kOut) << "Cannot sample out edges on CSC matrix.";
+          sampled_coo = aten::CSRRowWiseSampling(
+            hg->GetCSRMatrix(etype), nodes_ntype, fanouts[etype], prob[etype], replace);
+          break;
+        case SparseFormat::kCSC:
+          CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
+          ::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
+          sampled_coo = aten::CSRRowWiseSamplingWithCache(
+            hg->GetCSCMatrix(etype), hg_cache->GetCSCMatrix(etype), nodes_ntype, fanouts[etype], prob[etype], replace);
+          sampled_coo = aten::COOTranspose(sampled_coo);
+          break;
+        default:
+          LOG(FATAL) << "Unsupported sparse format.";
+      }
+      subrels[etype] = UnitGraph::CreateFromCOO(
+        hg->GetRelationGraph(etype)->NumVertexTypes(), sampled_coo.num_rows, sampled_coo.num_cols,
+        sampled_coo.row, sampled_coo.col);
+      induced_edges[etype] = sampled_coo.data;
+    }
+  }
+
+  HeteroSubgraph ret;
+  ret.graph = CreateHeteroGraph(hg->meta_graph(), subrels, hg->NumVerticesPerType());
+  ret.induced_vertices.resize(hg->NumVertexTypes());
+  ret.induced_edges = std::move(induced_edges);
+  if (!exclude_edges.empty()) {
+    return ExcludeCertainEdges(ret, exclude_edges);
+  }
+  return ret;
 }
 
 HeteroSubgraph SampleNeighbors(
@@ -131,6 +230,7 @@ HeteroSubgraph SampleNeighbors(
           break;
         case SparseFormat::kCSC:
           CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
+          ::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
           sampled_coo = aten::CSRRowWiseSampling(
             hg->GetCSCMatrix(etype), nodes_ntype, fanouts[etype], prob[etype], replace);
           sampled_coo = aten::COOTranspose(sampled_coo);
@@ -437,8 +537,35 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsEType")
     *rv = HeteroSubgraphRef(subg);
   });
 
+DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsWithCache")
+.set_body([] (DGLArgs args, DGLRetValue *rv) {
+    ::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighborsWithCache" << ::std::endl;
+    HeteroGraphRef hg = args[0];
+    HeteroGraphRef hg_cache = args[1];
+    const auto& nodes = ListValueToVector<IdArray>(args[2]);
+    IdArray fanouts_array = args[3];
+    const auto& fanouts = fanouts_array.ToVector<int64_t>();
+    const std::string dir_str = args[4];
+    const auto& prob = ListValueToVector<FloatArray>(args[5]);
+    const auto& exclude_edges = ListValueToVector<IdArray>(args[6]);
+    const bool replace = args[7];
+
+    CHECK(dir_str == "in" || dir_str == "out")
+      << "Invalid edge direction. Must be \"in\" or \"out\".";
+    EdgeDir dir = (dir_str == "in")? EdgeDir::kIn : EdgeDir::kOut;
+
+    std::shared_ptr<HeteroSubgraph> subg(new HeteroSubgraph);
+    *subg = sampling::SampleNeighborsWithCache(
+        hg.sptr(), hg_cache.sptr(), nodes, fanouts, dir, prob, exclude_edges, replace);
+
+    *rv = HeteroSubgraphRef(subg);
+  });
+
+
+
 DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighbors")
 .set_body([] (DGLArgs args, DGLRetValue *rv) {
+    ::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighbors" << ::std::endl;
     HeteroGraphRef hg = args[0];
     const auto& nodes = ListValueToVector<IdArray>(args[1]);
     IdArray fanouts_array = args[2];
