@@ -250,9 +250,89 @@ __global__ void _CSRRowWiseSampleReplaceKernel(
 
 /////////////////////////////// CSR + UVA + CACHE ///////////////////////////////
 
-/*
+template<typename IdType, int BLOCK_WARPS, int TILE_SIZE>
+__global__ void _CSRRowWiseSampleWithCacheKernel(
+    const uint64_t rand_seed,
+    const int64_t num_picks,
+    const int64_t num_rows,
+    const int64_t cache_size,
+    const IdType * const in_rows,
+    IdType * in_ptr_orig,
+    IdType * in_ptr_cache,
+    IdType * in_index_orig,
+    IdType * in_index_cache,
+    const IdType * const data,
+    const IdType * const out_ptr,
+    IdType * const out_rows,
+    IdType * const out_cols,
+    IdType * const out_idxs) {
+  // we assign one warp per row
+  assert(blockDim.x == WARP_SIZE);
+  assert(blockDim.y == BLOCK_WARPS);
+
+  int64_t out_row = blockIdx.x*TILE_SIZE+threadIdx.y;
+  const int64_t last_row = min(static_cast<int64_t>(blockIdx.x+1)*TILE_SIZE, num_rows);
+
+  curandState rng;
+  curand_init((rand_seed*gridDim.x+blockIdx.x)*blockDim.y+threadIdx.y, threadIdx.x, 0, &rng);
+
+  while (out_row < last_row) {
+    const int64_t row = in_rows[out_row];
+
+    IdType * in_ptr = in_ptr_orig;
+    IdType * in_index = in_index_orig;
+    if (row < cache_size) {
+        in_ptr = in_ptr_cache;
+        in_index = in_index_cache;
+    }
+
+    const int64_t in_row_start = in_ptr[row];
+    const int64_t deg = in_ptr[row+1] - in_row_start;
+
+    const int64_t out_row_start = out_ptr[out_row];
+
+    if (deg <= num_picks) {
+      // just copy row
+      for (int idx = threadIdx.x; idx < deg; idx += WARP_SIZE) {
+        const IdType in_idx = in_row_start+idx;
+        out_rows[out_row_start+idx] = row;
+        out_cols[out_row_start+idx] = in_index[in_idx];
+        out_idxs[out_row_start+idx] = data ? data[in_idx] : in_idx;
+      }
+    } else {
+      // generate permutation list via reservoir algorithm
+      for (int idx = threadIdx.x; idx < num_picks; idx+=WARP_SIZE) {
+        out_idxs[out_row_start+idx] = idx;
+      }
+      __syncwarp();
+
+      for (int idx = num_picks+threadIdx.x; idx < deg; idx+=WARP_SIZE) {
+        const int num = curand(&rng)%(idx+1);
+        if (num < num_picks) {
+          // use max so as to achieve the replacement order the serial
+          // algorithm would have
+          AtomicMax(out_idxs+out_row_start+num, idx);
+        }
+      }
+      __syncwarp();
+
+      // copy permutation over
+      for (int idx = threadIdx.x; idx < num_picks; idx += WARP_SIZE) {
+        const IdType perm_idx = out_idxs[out_row_start+idx]+in_row_start;
+        out_rows[out_row_start+idx] = row;
+        out_cols[out_row_start+idx] = in_index[perm_idx];
+        if (data) {
+          out_idxs[out_row_start+idx] = data[perm_idx];
+        }
+      }
+    }
+
+    out_row += BLOCK_WARPS;
+  }
+}
+
 template<typename IdType>
-__global__ void _CSRRowWiseSampleDegreeKernelWithCache(
+__global__ void _CSRRowWiseSampleDegreeWithCacheKernel(
     const int64_t num_picks,
     const int64_t num_rows,
     const int64_t cache_size,
@@ -265,7 +345,7 @@ __global__ void _CSRRowWiseSampleDegreeKernelWithCache(
   if (tIdx < num_rows) {
     const int in_row = in_rows[tIdx];
     const int out_row = tIdx;
-    if (in_row > cache_size-2) {
+    if (in_row > cache_size-1) {
         out_deg[out_row] = min(static_cast<IdType>(num_picks), in_ptr[in_row+1]-in_ptr[in_row]);
     } else {
         out_deg[out_row] = min(static_cast<IdType>(num_picks), in_ptr_cache[in_row+1]-in_ptr_cache[in_row]);
@@ -277,7 +357,6 @@ __global__ void _CSRRowWiseSampleDegreeKernelWithCache(
     }
   }
 }
-*/
 
 template <DLDeviceType XPU, typename IdType>
 COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
@@ -301,10 +380,10 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
   IdArray picked_col = NewIdArray(num_rows * num_picks, ctx, sizeof(IdType) * 8);
   IdArray picked_idx = NewIdArray(num_rows * num_picks, ctx, sizeof(IdType) * 8);
 
-  const IdType * const in_ptr = static_cast<const IdType*>(mat.indptr->data);
-  const IdType * const in_cols = static_cast<const IdType*>(mat.indices->data);
-  const IdType * const in_ptr_cache = static_cast<const IdType*>(mat_cache.indptr->data);
-  const IdType * const in_cols_cache = static_cast<const IdType*>(mat_cache.indices->data);
+  IdType * in_ptr = static_cast<IdType*>(mat.indptr->data);
+  IdType * in_cols = static_cast<IdType*>(mat.indices->data);
+  IdType * in_ptr_cache = static_cast<IdType*>(mat_cache.indptr->data);
+  IdType * in_cols_cache = static_cast<IdType*>(mat_cache.indices->data);
 
   IdType* const out_rows = static_cast<IdType*>(picked_row->data);
   IdType* const out_cols = static_cast<IdType*>(picked_col->data);
@@ -325,8 +404,8 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
   } else {
     const dim3 block(512);
     const dim3 grid((num_rows+block.x-1)/block.x);
-    _CSRRowWiseSampleDegreeKernel<<<grid, block, 0, stream>>>(
-        num_picks, num_rows, slice_rows, in_ptr, out_deg);
+    _CSRRowWiseSampleDegreeWithCacheKernel<<<grid, block, 0, stream>>>(
+        num_picks, num_rows, cache_size, slice_rows, in_ptr, in_ptr_cache, out_deg);
   }
 
   // fill out_ptr
@@ -368,6 +447,7 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
   // select edges
   // determine the content of col indices
   if (replace) {
+    ::std::cout << "in impl::CSRRowWiseSamplingUniformWithCache, fallback!!" << ::std::endl;
     constexpr int BLOCK_WARPS = 128/WARP_SIZE;
     // the number of rows each thread block will cover
     constexpr int TILE_SIZE = BLOCK_WARPS*16;
@@ -391,13 +471,16 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
     constexpr int TILE_SIZE = BLOCK_WARPS*16;
     const dim3 block(WARP_SIZE, BLOCK_WARPS);
     const dim3 grid((num_rows+TILE_SIZE-1)/TILE_SIZE);
-    _CSRRowWiseSampleKernel<IdType, BLOCK_WARPS, TILE_SIZE><<<grid, block, 0, stream>>>(
+    _CSRRowWiseSampleWithCacheKernel<IdType, BLOCK_WARPS, TILE_SIZE><<<grid, block, 0, stream>>>(
         random_seed,
         num_picks,
         num_rows,
+        cache_size,
         slice_rows,
         in_ptr,
+        in_ptr_cache,
         in_cols,
+        in_cols_cache,
         data,
         out_ptr,
         out_rows,
