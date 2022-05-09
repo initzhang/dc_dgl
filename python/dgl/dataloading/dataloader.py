@@ -507,10 +507,9 @@ class CollateWrapper(object):
     """Wraps a collate function with :func:`remove_parent_storage_columns` for serializing
     from PyTorch DataLoader workers.
     """
-    def __init__(self, sample_func, g, g_cache, use_uva, device):
+    def __init__(self, sample_func, g, use_uva, device):
         self.sample_func = sample_func
         self.g = g
-        self.g_cache = g_cache
         self.use_uva = use_uva
         self.device = device
 
@@ -519,7 +518,7 @@ class CollateWrapper(object):
             # Only copy the indices to the given device if in UVA mode or the graph is not on
             # CPU.
             items = recursive_apply(items, lambda x: x.to(self.device))
-        batch = self.sample_func(self.g, self.g_cache, items)
+        batch = self.sample_func(self.g, items)
         return recursive_apply(batch, remove_parent_storage_columns, self.g)
 
 
@@ -852,7 +851,7 @@ class DataLoader(torch.utils.data.DataLoader):
         super().__init__(
             self.dataset,
             collate_fn=CollateWrapper(
-                self.graph_sampler.sample, graph, self.graph_sampler.g_cache, self.use_uva, self.device),
+                self.graph_sampler.sample, graph, self.use_uva, self.device),
             batch_size=None,
             worker_init_fn=worker_init_fn,
             **kwargs)
