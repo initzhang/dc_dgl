@@ -137,7 +137,7 @@ HeteroSubgraph SampleNeighborsWithCache(
           break;
         case SparseFormat::kCSC:
           CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
-          ::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
+          //::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
           sampled_coo = aten::CSRRowWiseSamplingWithCache(
             hg->GetCSCMatrix(etype), hg_cache->GetCSCMatrix(etype), cache_size, nodes_ntype, fanouts[etype], prob[etype], replace);
           sampled_coo = aten::COOTranspose(sampled_coo);
@@ -231,7 +231,7 @@ HeteroSubgraph SampleNeighbors(
           break;
         case SparseFormat::kCSC:
           CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
-          ::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
+          //::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
           sampled_coo = aten::CSRRowWiseSampling(
             hg->GetCSCMatrix(etype), nodes_ntype, fanouts[etype], prob[etype], replace);
           sampled_coo = aten::COOTranspose(sampled_coo);
@@ -540,7 +540,7 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsEType")
 
 DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsWithCache")
 .set_body([] (DGLArgs args, DGLRetValue *rv) {
-    ::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighborsWithCache" << ::std::endl;
+    //::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighborsWithCache" << ::std::endl;
     HeteroGraphRef hg = args[0];
     HeteroGraphRef hg_cache = args[1];
     const int64_t cache_size = args[2];
@@ -567,7 +567,7 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsWithCache")
 
 DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighbors")
 .set_body([] (DGLArgs args, DGLRetValue *rv) {
-    ::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighbors" << ::std::endl;
+    //::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighbors" << ::std::endl;
     HeteroGraphRef hg = args[0];
     const auto& nodes = ListValueToVector<IdArray>(args[1]);
     IdArray fanouts_array = args[2];

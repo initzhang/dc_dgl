@@ -365,7 +365,7 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
                                     IdArray rows,
                                     const int64_t num_picks,
                                     const bool replace) {
-  ::std::cout << "in impl::CSRRowWiseSamplingUniformWithCache, cuda kernel" << ::std::endl;
+  //::std::cout << "in impl::CSRRowWiseSamplingUniformWithCache, cuda kernel" << ::std::endl;
   const auto& ctx = rows->ctx;
   auto device = runtime::DeviceAPI::Get(ctx);
 
@@ -514,7 +514,7 @@ COOMatrix CSRRowWiseSamplingUniform(CSRMatrix mat,
                                     IdArray rows,
                                     const int64_t num_picks,
                                     const bool replace) {
-  ::std::cout << "in impl::CSRRowWiseSamplingUniform, cuda kernel" << ::std::endl;
+  //::std::cout << "in impl::CSRRowWiseSamplingUniform, cuda kernel" << ::std::endl;
   const auto& ctx = rows->ctx;
   auto device = runtime::DeviceAPI::Get(ctx);
 

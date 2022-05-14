@@ -550,7 +550,7 @@ COOMatrix CSRRowWiseSamplingWithCache(
     CSRMatrix mat, CSRMatrix mat_cache, int64_t cache_size, IdArray rows, int64_t num_samples, FloatArray prob, bool replace) {
   COOMatrix ret;
   if (IsNullArray(prob)) {
-    ::std::cout << "in aten::CSRRowWiseSamplingWithCache, ATEN_CSR_SWITCH_CUDA_UVA" << ::std::endl;
+    //::std::cout << "in aten::CSRRowWiseSamplingWithCache, ATEN_CSR_SWITCH_CUDA_UVA" << ::std::endl;
     ATEN_CSR_SWITCH_CUDA_UVA(mat, rows, XPU, IdType, "CSRRowWiseSamplingWithCache", {
       ret = impl::CSRRowWiseSamplingUniformWithCache<XPU, IdType>(mat, mat_cache, cache_size, rows, num_samples, replace);
     });
@@ -564,7 +564,7 @@ COOMatrix CSRRowWiseSampling(
     CSRMatrix mat, IdArray rows, int64_t num_samples, FloatArray prob, bool replace) {
   COOMatrix ret;
   if (IsNullArray(prob)) {
-    ::std::cout << "in aten::CSRRowWiseSampling, ATEN_CSR_SWITCH_CUDA_UVA" << ::std::endl;
+    //::std::cout << "in aten::CSRRowWiseSampling, ATEN_CSR_SWITCH_CUDA_UVA" << ::std::endl;
     ATEN_CSR_SWITCH_CUDA_UVA(mat, rows, XPU, IdType, "CSRRowWiseSampling", {
       ret = impl::CSRRowWiseSamplingUniform<XPU, IdType>(mat, rows, num_samples, replace);
     });
