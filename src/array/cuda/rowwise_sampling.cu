@@ -261,7 +261,8 @@ __global__ void _CSRRowWiseSampleWithCacheKernel(
     IdType * in_ptr_cache,
     IdType * in_index_orig,
     IdType * in_index_cache,
-    const IdType * const data,
+    IdType * data_orig,
+    IdType * data_cache,
     const IdType * const out_ptr,
     IdType * const out_rows,
     IdType * const out_cols,
@@ -281,9 +282,11 @@ __global__ void _CSRRowWiseSampleWithCacheKernel(
 
     IdType * in_ptr = in_ptr_orig;
     IdType * in_index = in_index_orig;
-    if (row < cache_size) {
+    IdType * data = data_orig;
+    if (row < cache_size-2) {
         in_ptr = in_ptr_cache;
         in_index = in_index_cache;
+        data = data_cache;
     }
 
     const int64_t in_row_start = in_ptr[row];
@@ -345,10 +348,10 @@ __global__ void _CSRRowWiseSampleDegreeWithCacheKernel(
   if (tIdx < num_rows) {
     const int in_row = in_rows[tIdx];
     const int out_row = tIdx;
-    if (in_row > cache_size-1) {
-        out_deg[out_row] = min(static_cast<IdType>(num_picks), in_ptr[in_row+1]-in_ptr[in_row]);
-    } else {
+    if (in_row < cache_size-2) {
         out_deg[out_row] = min(static_cast<IdType>(num_picks), in_ptr_cache[in_row+1]-in_ptr_cache[in_row]);
+    } else {
+        out_deg[out_row] = min(static_cast<IdType>(num_picks), in_ptr[in_row+1]-in_ptr[in_row]);
     }
 
     if (out_row == num_rows-1) {
@@ -389,8 +392,10 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
   IdType* const out_cols = static_cast<IdType*>(picked_col->data);
   IdType* const out_idxs = static_cast<IdType*>(picked_idx->data);
 
-  const IdType* const data = CSRHasData(mat) ?
+  IdType* data = CSRHasData(mat) ?
       static_cast<IdType*>(mat.data->data) : nullptr;
+  IdType* data_cache = CSRHasData(mat_cache) ?
+      static_cast<IdType*>(mat_cache.data->data) : nullptr;
 
   // compute degree
   IdType * out_deg = static_cast<IdType*>(
@@ -482,6 +487,7 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
         in_cols,
         in_cols_cache,
         data,
+        data_cache,
         out_ptr,
         out_rows,
         out_cols,
