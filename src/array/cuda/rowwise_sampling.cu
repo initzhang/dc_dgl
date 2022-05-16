@@ -476,6 +476,8 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
     constexpr int TILE_SIZE = BLOCK_WARPS*16;
     const dim3 block(WARP_SIZE, BLOCK_WARPS);
     const dim3 grid((num_rows+TILE_SIZE-1)/TILE_SIZE);
+    //::std::cout << "==NEW==: WARP_SIZE, BLOCK_WARPS, num_rows, TILE_SIZE" << ::std::endl;
+    //::std::cout << WARP_SIZE << " " << BLOCK_WARPS << " " << num_rows << " " << TILE_SIZE << ::std::endl;
     _CSRRowWiseSampleWithCacheKernel<IdType, BLOCK_WARPS, TILE_SIZE><<<grid, block, 0, stream>>>(
         random_seed,
         num_picks,
@@ -620,6 +622,8 @@ COOMatrix CSRRowWiseSamplingUniform(CSRMatrix mat,
     constexpr int TILE_SIZE = BLOCK_WARPS*16;
     const dim3 block(WARP_SIZE, BLOCK_WARPS);
     const dim3 grid((num_rows+TILE_SIZE-1)/TILE_SIZE);
+    //::std::cout << "==OLD==: WARP_SIZE, BLOCK_WARPS, num_rows, TILE_SIZE" << ::std::endl;
+    //::std::cout << WARP_SIZE << " " << BLOCK_WARPS << " " << num_rows << " " << TILE_SIZE << ::std::endl;
     _CSRRowWiseSampleKernel<IdType, BLOCK_WARPS, TILE_SIZE><<<grid, block, 0, stream>>>(
         random_seed,
         num_picks,
