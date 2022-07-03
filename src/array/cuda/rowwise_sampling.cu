@@ -303,6 +303,13 @@ __global__ void _CSRRowWiseSampleWithCacheKernel(
         out_idxs[out_row_start+idx] = data ? data[in_idx] : in_idx;
       }
     } else {
+      for (int idx = threadIdx.x; idx < num_picks; idx += WARP_SIZE) {
+        const IdType in_idx = in_row_start+idx;
+        out_rows[out_row_start+idx] = row;
+        out_cols[out_row_start+idx] = in_index[in_idx];
+        out_idxs[out_row_start+idx] = data ? data[in_idx] : in_idx;
+      }
+        /*
       // generate permutation list via reservoir algorithm
       for (int idx = threadIdx.x; idx < num_picks; idx+=WARP_SIZE) {
         out_idxs[out_row_start+idx] = idx;
@@ -328,6 +335,7 @@ __global__ void _CSRRowWiseSampleWithCacheKernel(
           out_idxs[out_row_start+idx] = data[perm_idx];
         }
       }
+      */
     }
 
     out_row += BLOCK_WARPS;
