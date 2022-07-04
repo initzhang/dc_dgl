@@ -65,8 +65,8 @@ HeteroSubgraph ExcludeCertainEdges(
 
 HeteroSubgraph SampleNeighborsWithCache(
     const HeteroGraphPtr hg,
-    const HeteroGraphPtr hg_cache,
-    const int64_t cache_size,
+    const IdArray& cached_indptr,
+    const IdArray& cached_indices,
     const std::vector<IdArray>& nodes,
     const std::vector<int64_t>& fanouts,
     EdgeDir dir,
@@ -139,7 +139,7 @@ HeteroSubgraph SampleNeighborsWithCache(
           CHECK(dir == EdgeDir::kIn) << "Cannot sample in edges on CSR matrix.";
           //::std::cout << "in case SparseFormat::kCSC" << ::std::endl;
           sampled_coo = aten::CSRRowWiseSamplingWithCache(
-            hg->GetCSCMatrix(etype), hg_cache->GetCSCMatrix(etype), cache_size, nodes_ntype, fanouts[etype], prob[etype], replace);
+            hg->GetCSCMatrix(etype), cached_indptr, cached_indices, nodes_ntype, fanouts[etype], prob[etype], replace);
           sampled_coo = aten::COOTranspose(sampled_coo);
           break;
         default:
@@ -542,8 +542,11 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsWithCache")
 .set_body([] (DGLArgs args, DGLRetValue *rv) {
     //::std::cout << "in sampling.neighbor._CAPI_DGLSampleNeighborsWithCache" << ::std::endl;
     HeteroGraphRef hg = args[0];
-    HeteroGraphRef hg_cache = args[1];
-    const int64_t cache_size = args[2];
+
+    // not sure whether ToVector will change GPU tensor to CPU!
+    IdArray cached_indptr = args[1];
+    IdArray cached_indices = args[2];
+
     const auto& nodes = ListValueToVector<IdArray>(args[3]);
     IdArray fanouts_array = args[4];
     const auto& fanouts = fanouts_array.ToVector<int64_t>();
@@ -558,7 +561,7 @@ DGL_REGISTER_GLOBAL("sampling.neighbor._CAPI_DGLSampleNeighborsWithCache")
 
     std::shared_ptr<HeteroSubgraph> subg(new HeteroSubgraph);
     *subg = sampling::SampleNeighborsWithCache(
-        hg.sptr(), hg_cache.sptr(), cache_size, nodes, fanouts, dir, prob, exclude_edges, replace);
+        hg.sptr(), cached_indptr, cached_indices, nodes, fanouts, dir, prob, exclude_edges, replace);
 
     *rv = HeteroSubgraphRef(subg);
   });

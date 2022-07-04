@@ -547,12 +547,12 @@ CSRMatrix CSRRemove(CSRMatrix csr, IdArray entries) {
 }
 
 COOMatrix CSRRowWiseSamplingWithCache(
-    CSRMatrix mat, CSRMatrix mat_cache, int64_t cache_size, IdArray rows, int64_t num_samples, FloatArray prob, bool replace) {
+    CSRMatrix mat, const IdArray& cached_indptr, const IdArray& cached_indices, IdArray rows, int64_t num_samples, FloatArray prob, bool replace) {
   COOMatrix ret;
   if (IsNullArray(prob)) {
     //::std::cout << "in aten::CSRRowWiseSamplingWithCache, ATEN_CSR_SWITCH_CUDA_UVA" << ::std::endl;
     ATEN_CSR_SWITCH_CUDA_UVA(mat, rows, XPU, IdType, "CSRRowWiseSamplingWithCache", {
-      ret = impl::CSRRowWiseSamplingUniformWithCache<XPU, IdType>(mat, mat_cache, cache_size, rows, num_samples, replace);
+      ret = impl::CSRRowWiseSamplingUniformWithCache<XPU, IdType>(mat, cached_indptr, cached_indices, rows, num_samples, replace);
     });
   } else {
     LOG(FATAL) << "Only int32 or int64 is supported.";

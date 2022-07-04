@@ -283,7 +283,7 @@ __global__ void _CSRRowWiseSampleWithCacheKernel(
     IdType * in_ptr = in_ptr_orig;
     IdType * in_index = in_index_orig;
     IdType * data = data_orig;
-    if (row < cache_size-2) {
+    if (row < cache_size-1) {
         in_ptr = in_ptr_cache;
         in_index = in_index_cache;
         data = data_cache;
@@ -348,7 +348,7 @@ __global__ void _CSRRowWiseSampleDegreeWithCacheKernel(
   if (tIdx < num_rows) {
     const int in_row = in_rows[tIdx];
     const int out_row = tIdx;
-    if (in_row < cache_size-2) {
+    if (in_row < cache_size-1) {
         out_deg[out_row] = min(static_cast<IdType>(num_picks), in_ptr_cache[in_row+1]-in_ptr_cache[in_row]);
     } else {
         out_deg[out_row] = min(static_cast<IdType>(num_picks), in_ptr[in_row+1]-in_ptr[in_row]);
@@ -363,8 +363,8 @@ __global__ void _CSRRowWiseSampleDegreeWithCacheKernel(
 
 template <DLDeviceType XPU, typename IdType>
 COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
-                                    CSRMatrix mat_cache,
-                                    const int64_t cache_size,
+                                    const IdArray& cached_indptr,
+                                    const IdArray& cached_indices,
                                     IdArray rows,
                                     const int64_t num_picks,
                                     const bool replace) {
@@ -385,23 +385,23 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
 
   IdType * in_ptr = static_cast<IdType*>(mat.indptr->data);
   IdType * in_cols = static_cast<IdType*>(mat.indices->data);
-  IdType * in_ptr_cache = static_cast<IdType*>(mat_cache.indptr->data);
-  IdType * in_cols_cache = static_cast<IdType*>(mat_cache.indices->data);
+  IdType * in_ptr_cache = static_cast<IdType*>(cached_indptr->data);
+  IdType * in_cols_cache = static_cast<IdType*>(cached_indices->data);
+  const int64_t cache_size = cached_indptr.NumElements() - 1;
 
   IdType* const out_rows = static_cast<IdType*>(picked_row->data);
   IdType* const out_cols = static_cast<IdType*>(picked_col->data);
   IdType* const out_idxs = static_cast<IdType*>(picked_idx->data);
 
-  IdType* data = CSRHasData(mat) ?
-      static_cast<IdType*>(mat.data->data) : nullptr;
-  IdType* data_cache = CSRHasData(mat_cache) ?
-      static_cast<IdType*>(mat_cache.data->data) : nullptr;
+  // we assume no data ptr is needed
+  IdType* data = nullptr;
+  IdType* data_cache = nullptr;
 
   // compute degree
   IdType * out_deg = static_cast<IdType*>(
       device->AllocWorkspace(ctx, (num_rows+1)*sizeof(IdType)));
   if (replace) {
-    ::std::cout << "in impl::CSRRowWiseSamplingUniformWithCache, fallback!!" << ::std::endl;
+    ::std::cout << "in impl::CSRRowWiseSamplingUniformWithCache+replace, fallback!!" << ::std::endl;
     const dim3 block(512);
     const dim3 grid((num_rows+block.x-1)/block.x);
     _CSRRowWiseSampleDegreeReplaceKernel<<<grid, block, 0, stream>>>(
@@ -452,7 +452,7 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
   // select edges
   // determine the content of col indices
   if (replace) {
-    ::std::cout << "in impl::CSRRowWiseSamplingUniformWithCache, fallback!!" << ::std::endl;
+    LOG(FATAL) << "not implemented, in impl::CSRRowWiseSamplingUniformWithCache with replace";
     constexpr int BLOCK_WARPS = 128/WARP_SIZE;
     // the number of rows each thread block will cover
     constexpr int TILE_SIZE = BLOCK_WARPS*16;
@@ -510,9 +510,9 @@ COOMatrix CSRRowWiseSamplingUniformWithCache(CSRMatrix mat,
 }
 
 template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLGPU, int32_t>(
-    CSRMatrix, CSRMatrix, int64_t, IdArray, int64_t, bool);
+    CSRMatrix, const IdArray&, const IdArray&, IdArray, int64_t, bool);
 template COOMatrix CSRRowWiseSamplingUniformWithCache<kDLGPU, int64_t>(
-    CSRMatrix, CSRMatrix, int64_t, IdArray, int64_t, bool);
+    CSRMatrix, const IdArray&, const IdArray&, IdArray, int64_t, bool);
 
 
 /////////////////////////////// CSR ///////////////////////////////
