@@ -165,7 +165,8 @@ ToBlockGPU(
   std::vector<IdArray>& lhs_nodes = *lhs_nodes_ptr;
   const bool generate_lhs_nodes = lhs_nodes.empty();
 
-  cudaStream_t stream = 0;
+  //cudaStream_t stream = 0;
+  cudaStream_t stream = ::dgl::runtime::CUDAThreadEntry::ThreadLocal()->stream;
   const auto& ctx = graph->Context();
   auto device = runtime::DeviceAPI::Get(ctx);
 
