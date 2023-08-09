@@ -3,9 +3,10 @@
 
 1. prepare a new conda env and activate it
 
-2. the build of DGL requires pytorch installation first, in our machine we install the 1.9.1+cu102 version
+2. the build of our DGL requires pytorch & scipy installation first, in our machine we install the 1.9.1+cu102 version of pytorch
 ```
 pip install torch==1.9.1+cu102 -f https://download.pytorch.org/whl/torch_stable.html
+pip install scipy 
 ```
 
 3. prepare necessary submodules of DGL
@@ -13,16 +14,24 @@ pip install torch==1.9.1+cu102 -f https://download.pytorch.org/whl/torch_stable.
 git submodule update --init --recursive
 ```
 
-4. build & install our dgl from source, remember to use your onw c/cxx compiler path
+4. build our dgl from source, we use gcc7 & g++7 on our machine
 ```
 mkdir build
 cd build
 cmake -DBUILD_TORCH=ON -DUSE_CUDA=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc7 -DCMAKE_CXX_COMPILER=/usr/local/bin/g++7 ..
 make -j
-cd ../python; python setup.py install
 ```
 
-5. install other required python libs in DUCATI's repo
+5. install python package of our DGL, and check installation
+```
+cd ../python; python setup.py install
+pip list | grep dgl 
+# should show dgl 0.9, since we modify dgl 0.8 codebase and build a newer version
+
+cd ..
+python test_installation.py
+# should print 'test successful', otherwise please check installation again
+```
 
 
 ======
