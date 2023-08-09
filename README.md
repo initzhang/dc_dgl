@@ -1,3 +1,31 @@
+## Recommended workflow to install this customized version of DGL
+
+
+1. prepare a new conda env and activate it
+
+2. the build of DGL requires pytorch installation first, in our machine we install the 1.9.1+cu102 version
+```
+pip install torch==1.9.1+cu102 -f https://download.pytorch.org/whl/torch_stable.html
+```
+
+3. prepare necessary submodules of DGL
+```
+git submodule update --init --recursive
+```
+
+4. build & install our dgl from source, remember to use your onw c/cxx compiler path
+```
+mkdir build
+cd build
+cmake -DBUILD_TORCH=ON -DUSE_CUDA=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc7 -DCMAKE_CXX_COMPILER=/usr/local/bin/g++7 ..
+make -j
+cd ../python; python setup.py install
+```
+
+5. install other required python libs in DUCATI's repo
+
+
+======
 <p align="center">
   <img src="http://data.dgl.ai/asset/logo.jpg" height="200">
 </p>
