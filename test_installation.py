@@ -11,6 +11,7 @@ try:
     seed_nodes = torch.arange(10).cuda()
     fanout = 10
     sg = dgl.sampling.sample_neighbors_with_cache(g, cached_indptr, cached_indices, seed_nodes, fanout)
+    torch.cuda.synchronize()
     print('test successful') 
 except Exception as error:
     print(error)
