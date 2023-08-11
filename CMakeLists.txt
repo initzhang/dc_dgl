@@ -94,8 +94,8 @@ else(MSVC)
   include(CheckCXXCompilerFlag)
   # tensorpipe's dependencies require C++14
   check_cxx_compiler_flag("-std=c++14"    SUPPORT_CXX14)
-  set(CMAKE_C_FLAGS "-O2 -Wall -fPIC ${CMAKE_C_FLAGS}")
-  set(CMAKE_CXX_FLAGS "-O2 -Wall -fPIC -std=c++14 ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_C_FLAGS "-O2 -Wall -Wno-error=sign-compare -fPIC ${CMAKE_C_FLAGS}")
+  set(CMAKE_CXX_FLAGS "-O2 -Wall -Wno-error=sign-compare -fPIC -std=c++14 ${CMAKE_CXX_FLAGS}")
   if(NOT APPLE)
     set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--warn-common ${CMAKE_SHARED_LINKER_FLAGS}")
   endif(NOT APPLE)
@@ -239,11 +239,11 @@ endif(NOT MSVC)
 # Compile LIBXSMM
 if((NOT MSVC) AND USE_LIBXSMM)
   if(REBUILD_LIBXSMM)
-    add_custom_target(libxsmm COMMAND make realclean COMMAND make -j BLAS=0
+    add_custom_target(libxsmm COMMAND make realclean COMMAND make -j ECFLAGS="-Wno-error=deprecated-declarations" BLAS=0
                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/libxsmm
                       )
   else(REBUILD_LIBXSMM)
-    add_custom_target(libxsmm COMMAND make -j BLAS=0
+    add_custom_target(libxsmm COMMAND make -j ECFLAGS="-Wno-error=deprecated-declarations" BLAS=0
                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/libxsmm
                       )
   endif(REBUILD_LIBXSMM)
@@ -254,10 +254,28 @@ endif((NOT MSVC) AND USE_LIBXSMM)
 if(NOT MSVC)
   # Only build tensorpipe on linux
   string(REPLACE "-pedantic" "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
+  # Disable -Wall for third-party tensorpipe due to too many warnings
+  string(REPLACE "-Wall" "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
+  string(REPLACE "-Wall" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  set(WNOERROR_FLAGS "-Wno-error=sign-compare")
+  if (CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
+      set(WNOERROR_FLAGS "${WNOERROR_FLAGS} -Wno-error=dangling-pointer")
+  endif()
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${WNOERROR_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${WNOERROR_FLAGS}")
   set(TP_STATIC_OR_SHARED STATIC)
   add_subdirectory(third_party/tensorpipe)
   list(APPEND DGL_LINKER_LIBS tensorpipe)
   target_include_directories(dgl PRIVATE third_party/tensorpipe)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+  string(REPLACE "${WNOERROR_FLAGS}" "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
+  string(REPLACE "${WNOERROR_FLAGS}" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  # Avoid exposing third-party symbols when using DGL as a library.
+  if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+      set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,--exclude-libs,ALL")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wl,--exclude-libs,ALL")
+  endif()
 endif(NOT MSVC)
 
 # Compile TVM Runtime and Featgraph
