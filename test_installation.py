@@ -36,7 +36,7 @@ try:
     if not torch.equal(sg_ducati.edata['_ID'], sg_dgl.edata['_ID']):
         """
         while in my testing environment (with 2080Ti and A30) the sampling result of DUCATI is the same as DGL, I was 
-        informed by some users that this may not hold for other GPUs/settings. This issue could be caused by some
+        informed by some users that this may not hold for other GPUs (e.g. K80). This issue could be caused by some
         non-deterministic CUDA behaviors across different GPUs that I am not aware of, but generally it's not a big 
         deal and you can safely move on and reproduce the rest of the ducati repo.
         """
