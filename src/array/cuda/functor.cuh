@@ -9,6 +9,7 @@
 #include "./atomic.cuh"
 #include "./fp16.cuh"
 #include <cmath>
+#include <limits>
 
 namespace dgl {
 namespace aten {
