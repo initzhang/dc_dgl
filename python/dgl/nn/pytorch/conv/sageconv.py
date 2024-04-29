@@ -227,7 +227,8 @@ class SAGEConv(nn.Module):
                     feat_dst.shape[0], self._in_src_feats).to(feat_dst)
 
             # Determine whether to apply linear transformation before message passing A(XW)
-            lin_before_mp = self._in_src_feats > self._out_feats
+            #lin_before_mp = self._in_src_feats > self._out_feats
+            lin_before_mp = False # in mini-batch GNN, this should always be false
 
             # Message Passing
             if self._aggre_type == 'mean':

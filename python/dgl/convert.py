@@ -527,7 +527,9 @@ def create_block(data_dict, num_src_nodes=None, num_dst_nodes=None, idtype=None,
     # Convert all data to node tensors first
     node_tensor_dict = {}
     for (sty, ety, dty), data in data_dict.items():
-        (sparse_fmt, arrays), urange, vrange = utils.graphdata2tensors(
+        #(sparse_fmt, arrays), urange, vrange = utils.graphdata2tensors(
+        #    data, idtype, bipartite=True)
+        (sparse_fmt, arrays), urange, vrange = utils.graphdata2tensorsTRUST(
             data, idtype, bipartite=True)
         node_tensor_dict[(sty, ety, dty)] = (sparse_fmt, arrays)
         if need_infer:

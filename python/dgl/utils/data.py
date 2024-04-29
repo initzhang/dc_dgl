@@ -108,6 +108,14 @@ def networkx2tensor(nx_graph, idtype, edge_id_attr_name=None):
 
 SparseAdjTuple = namedtuple('SparseAdjTuple', ['format', 'arrays'])
 
+def graphdata2tensorsTRUST(data, idtype=None, bipartite=False, **kwargs):
+    assert isinstance(data, tuple)
+    assert data[0] == 'csc'
+    data = SparseAdjTuple(*data)
+    assert all([F.is_tensor(arr) for arr in data.arrays])
+    assert all([arr.dtype == F.int64 for arr in data.arrays])
+    return data, 0, 0
+
 def graphdata2tensors(data, idtype=None, bipartite=False, **kwargs):
     """Function to convert various types of data to edge tensors and infer
     the number of nodes.
